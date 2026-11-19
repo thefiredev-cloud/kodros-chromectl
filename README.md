@@ -2,6 +2,12 @@
 
 A one-file command line tool that lets an agent or script drive a Chromium you already have open. It talks to the browser over the Chrome DevTools Protocol on loopback. It opens tabs in the background, reads page text, clicks, types, takes screenshots and closes tabs by id.
 
+## Hardware and on-prem
+
+- It runs on any machine with Python 3 and a Chromium. No GPU and no server. It needs a Chromium with the DevTools port open on loopback.
+- Nothing leaves the machine by default. It connects to `127.0.0.1` only. A second machine is reached through your own SSH tunnel, and you name that host yourself.
+- It makes no calls to any cloud service. It is a plain client for the DevTools Protocol.
+
 ## How it works
 
 ```mermaid

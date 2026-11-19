@@ -32,7 +32,7 @@ Python 3 standard library only. No dependencies.
 ```bash
 git clone https://github.com/thefiredev-cloud/kodros-chromectl.git
 cd kodros-chromectl
-python3 -m unittest -v                  # 36 tests against an in-process CDP stub
+python3 -m unittest -v                  # 41 tests against an in-process CDP stub
 ./chromectl status
 ./chromectl open https://example.com    # prints a short tab id
 ./chromectl text <id>

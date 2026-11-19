@@ -61,6 +61,6 @@ An ID can be any unique prefix of the target id. To put it on your PATH: `ln -s 
 ```text
 chromectl               the whole tool
 tests/stub_cdp.py       in-process DevTools stub
-tests/test_chromectl.py 36 tests
+tests/test_chromectl.py 41 tests
 docs/architecture.svg   architecture diagram
 ```

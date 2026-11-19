@@ -329,6 +329,41 @@ class TestUsage(StubCase):
         self.assertEqual(code, 1)
         self.assertIn("Usage: chromectl", msg)
 
+    def test_host_without_value_prints_usage(self):
+        code, _, msg = self.run_ctl("--host")
+        self.assertEqual(code, 1)
+        self.assertIn("Usage: chromectl", msg)
+
+    def test_unknown_command_prints_usage(self):
+        code, out, msg = self.run_ctl("frobnicate")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("Usage: chromectl", msg)
+
+    def test_missing_arguments_are_usage_errors(self):
+        cases = [(("open",), "chromectl open URL"),
+                 (("nav", "abcd1234"), "chromectl nav ID URL"),
+                 (("text",), "chromectl text ID"),
+                 (("eval", "abcd1234"), "chromectl eval ID JS"),
+                 (("click", "abcd1234"), "chromectl click ID CSS"),
+                 (("type", "abcd1234", "#q"), "chromectl type ID CSS TEXT"),
+                 (("key", "abcd1234"), "chromectl key ID KEY"),
+                 (("shot", "abcd1234"), "chromectl shot ID FILE.png"),
+                 (("close",), "chromectl close ID")]
+        for argv, usage in cases:
+            code, out, msg = self.run_ctl(*argv)
+            self.assertEqual(code, 1, argv)
+            self.assertEqual(out, "", argv)
+            self.assertIn(usage, msg, argv)
+        self.assertEqual(self.stub.log, [], "an argument error must not contact the browser")
+
+    def test_extra_arguments_are_usage_errors(self):
+        code, out, msg = self.run_ctl("status", "extra")
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertIn("chromectl status", msg)
+        self.assertEqual(self.stub.log, [])
+
     def test_usage_documents_owner_visible(self):
         self.assertIn("front ID --owner-visible", self.ctl.__doc__)
 
@@ -375,6 +410,19 @@ class TestCliProcess(unittest.TestCase):
         self.assertEqual(self.cli("text", tid).stdout.strip(), "round trip")
         self.assertEqual(self.cli("close", tid).stdout.strip(), f"closed {tid}")
         self.assertEqual(self.stub.tabs, {})
+
+    def test_unreachable_browser_is_a_clean_error(self):
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        env = dict(self.env, CHROMECTL_ENDPOINT=f"127.0.0.1:{port}")
+        r = subprocess.run([sys.executable, SCRIPT, "status"], env=env, capture_output=True,
+                           text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(r.stdout, "")
+        self.assertIn("cannot reach CDP", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
 
 
 if __name__ == "__main__":

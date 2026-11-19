@@ -23,12 +23,19 @@ ID may be any unique prefix of the target id.
 Env: CHROMECTL_ENDPOINT=host:port overrides the CDP endpoint for any --host (used by the tests, which run against a stub).
      CHROMECTL_ON_REMOTE=1 means this process already runs on the remote machine, so no tunnel is opened.
 """
-import base64, json, os, socket, struct, subprocess, sys, time, urllib.request
+import base64, json, os, socket, struct, subprocess, sys, time, urllib.error, urllib.request
 
 HOSTS = {"local": int(os.environ.get("CHROMECTL_LOCAL_PORT", "9333")),
          "remote": int(os.environ.get("CHROMECTL_REMOTE_PORT", "9335"))}
 REMOTE_SSH = os.environ.get("CHROMECTL_REMOTE", "browser-host.example.com")
 REMOTE_TUNNEL_PORT = 19335
+
+USAGE = {"status": "chromectl status", "tabs": "chromectl tabs", "open": "chromectl open URL",
+         "nav": "chromectl nav ID URL", "text": "chromectl text ID", "eval": "chromectl eval ID JS",
+         "click": "chromectl click ID CSS", "type": "chromectl type ID CSS TEXT",
+         "key": "chromectl key ID KEY", "shot": "chromectl shot ID FILE.png", "close": "chromectl close ID"}
+ARITY = {"status": 0, "tabs": 0, "open": 1, "nav": 2, "text": 1, "eval": 2, "click": 2,
+         "type": 3, "key": 2, "shot": 2, "close": 1}
 
 
 def endpoint(host):
@@ -58,7 +65,20 @@ def endpoint(host):
 
 def http(ep, path, method="GET"):
     req = urllib.request.Request(f"http://{ep}{path}", method=method)
-    return json.load(urllib.request.urlopen(req, timeout=10))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as res:
+            return json.load(res)
+    except urllib.error.URLError as exc:
+        sys.exit(f"cannot reach CDP at {ep}{path}: {exc.reason}")
+
+
+def http_call(ep, path):
+    """A CDP HTTP route whose body carries nothing we need (close, activate)."""
+    try:
+        with urllib.request.urlopen(f"http://{ep}{path}", timeout=10) as res:
+            res.read()
+    except urllib.error.URLError as exc:
+        sys.exit(f"cannot reach CDP at {ep}{path}: {exc.reason}")
 
 
 class WS:
@@ -67,7 +87,10 @@ class WS:
     def __init__(self, url):
         hostport, path = url[len("ws://"):].split("/", 1)
         h, p = hostport.split(":")
-        self.s = socket.create_connection((h, int(p)), timeout=30)
+        try:
+            self.s = socket.create_connection((h, int(p)), timeout=30)
+        except OSError as exc:
+            sys.exit(f"cannot reach CDP websocket at {url}: {exc}")
         key = base64.b64encode(os.urandom(16)).decode()
         self.s.sendall((f"GET /{path} HTTP/1.1\r\nHost: {hostport}\r\nUpgrade: websocket\r\n"
                         f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
@@ -155,6 +178,8 @@ KEYS = {"Enter": (13, "\r"), "Tab": (9, "\t"), "Escape": (27, ""), "Backspace": 
 def main(argv):
     host = "local"
     if argv[:1] == ["--host"]:
+        if len(argv) < 2:
+            sys.exit(__doc__)
         host, argv = argv[1], argv[2:]
     if host not in HOSTS or not argv:
         sys.exit(__doc__)
@@ -167,6 +192,11 @@ def main(argv):
         args = [a for a in args if a != "--owner-visible"]
         if len(args) != 1:
             sys.exit("usage: chromectl front ID --owner-visible")
+    elif cmd not in ARITY:
+        sys.exit(__doc__)
+    elif len(args) != ARITY[cmd]:
+        # A missing or extra argument is a usage error, never a traceback.
+        sys.exit(f"usage: {USAGE[cmd]}")
     ep = endpoint(host)
 
     if cmd == "status":
@@ -180,11 +210,11 @@ def main(argv):
         print(r["targetId"][:8])
     elif cmd == "close":
         t = resolve(ep, args[0])
-        urllib.request.urlopen(f"http://{ep}/json/close/{t['id']}", timeout=10)
+        http_call(ep, f"/json/close/{t['id']}")
         print("closed", t["id"][:8])
     elif cmd == "front":
         t = resolve(ep, args[0])
-        urllib.request.urlopen(f"http://{ep}/json/activate/{t['id']}", timeout=10)
+        http_call(ep, f"/json/activate/{t['id']}")
         print("front", t["id"][:8])
     else:
         t = resolve(ep, args[0])

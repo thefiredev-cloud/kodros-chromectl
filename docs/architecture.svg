@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1106 250" width="1106" height="250" role="img" aria-label="kodros-chromectl architecture" font-family="ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+<defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#374151"/></marker></defs>
+<rect width="1106" height="250" fill="#ffffff"/>
+<text x="28" y="30" font-size="16" font-weight="700" fill="#111827">kodros-chromectl architecture</text>
+<path d="M238,139.0 C273.0,139.0 273.0,139.0 308,139.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M518,139.0 C553.0,139.0 553.0,91.0 588,91.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M518,139.0 C553.0,139.0 553.0,187.0 588,187.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M798,187.0 C833.0,187.0 833.0,91.0 868,91.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#ah)"/>
+<path d="M798,187.0 C833.0,187.0 833.0,187.0 868,187.0" fill="none" stroke="#374151" stroke-width="1.6" marker-end="url(#ah)"/>
+<rect x="28" y="104.0" width="210" height="70" rx="8" fill="#f3f4f6" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="5 4"/>
+<text x="133.0" y="134.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">Agent or script</text>
+<text x="133.0" y="153.0" font-size="11" text-anchor="middle" fill="#374151">chromectl COMMAND</text>
+<rect x="308" y="104.0" width="210" height="70" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
+<text x="413.0" y="134.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">chromectl</text>
+<text x="413.0" y="153.0" font-size="11" text-anchor="middle" fill="#374151">one file, stdlib only</text>
+<rect x="588" y="56.0" width="210" height="70" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
+<text x="693.0" y="86.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">Safety rules</text>
+<text x="693.0" y="105.0" font-size="11" text-anchor="middle" fill="#374151">background tabs, front needs a flag</text>
+<rect x="588" y="152.0" width="210" height="70" rx="8" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
+<text x="693.0" y="182.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">CDP client</text>
+<text x="693.0" y="201.0" font-size="11" text-anchor="middle" fill="#374151">HTTP routes + WebSocket</text>
+<rect x="868" y="56.0" width="210" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="1.5"/>
+<text x="973.0" y="86.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">Local Chromium</text>
+<text x="973.0" y="105.0" font-size="11" text-anchor="middle" fill="#374151">127.0.0.1:9333</text>
+<rect x="868" y="152.0" width="210" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="1.5"/>
+<text x="973.0" y="182.0" font-size="13" font-weight="600" text-anchor="middle" fill="#111827">Remote Chromium</text>
+<text x="973.0" y="201.0" font-size="11" text-anchor="middle" fill="#374151">through an SSH tunnel</text>
+</svg>

@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""chromectl: drive a visible Chromium over loopback CDP, on this machine or on one remote machine.
+
+Hosts (CDP binds 127.0.0.1 only; the remote host is reached through an SSH tunnel):
+  local   Chromium on this machine, 127.0.0.1:9333 (set CHROMECTL_LOCAL_PORT to change)
+  remote  Chromium on another machine, 127.0.0.1:9335 there (CHROMECTL_REMOTE_PORT);
+          CHROMECTL_REMOTE is the ssh host, default browser-host.example.com
+
+Usage: chromectl [--host local|remote] COMMAND [ARGS]
+  status                     browser version
+  tabs                       list page tabs (ID prefix, title, url)
+  open URL                   new background tab; prints its ID
+  nav ID URL                 navigate a tab
+  text ID                    print visible page text
+  eval ID JS                 evaluate JS, print JSON result
+  click ID CSS               click the first element matching CSS
+  type ID CSS TEXT           focus element and insert TEXT
+  key ID KEY                 press a key (Enter, Tab, Escape, ...)
+  shot ID FILE.png           screenshot a tab (no focus change)
+  front ID --owner-visible   bring a tab to the front; changes what the owner sees, so the flag is required
+  close ID                   close a tab
+ID may be any unique prefix of the target id.
+Env: CHROMECTL_ENDPOINT=host:port overrides the CDP endpoint for any --host (used by the tests, which run against a stub).
+     CHROMECTL_ON_REMOTE=1 means this process already runs on the remote machine, so no tunnel is opened.
+"""
+import base64, json, os, socket, struct, subprocess, sys, time, urllib.request
+
+HOSTS = {"local": int(os.environ.get("CHROMECTL_LOCAL_PORT", "9333")),
+         "remote": int(os.environ.get("CHROMECTL_REMOTE_PORT", "9335"))}
+REMOTE_SSH = os.environ.get("CHROMECTL_REMOTE", "browser-host.example.com")
+REMOTE_TUNNEL_PORT = 19335
+
+
+def endpoint(host):
+    override = os.environ.get("CHROMECTL_ENDPOINT")
+    if override:
+        return override
+    if host == "local":
+        return f"127.0.0.1:{HOSTS['local']}"
+    if os.environ.get("CHROMECTL_ON_REMOTE") == "1":
+        return f"127.0.0.1:{HOSTS['remote']}"
+    ep = f"127.0.0.1:{REMOTE_TUNNEL_PORT}"
+    try:
+        urllib.request.urlopen(f"http://{ep}/json/version", timeout=2)
+        return ep
+    except Exception:
+        pass
+    subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-fN",
+                    "-L", f"{REMOTE_TUNNEL_PORT}:127.0.0.1:{HOSTS['remote']}", REMOTE_SSH], check=True)
+    for _ in range(20):
+        try:
+            urllib.request.urlopen(f"http://{ep}/json/version", timeout=2)
+            return ep
+        except Exception:
+            time.sleep(0.25)
+    sys.exit("remote: CDP not reachable. Chromium must be (re)started after the flags change.")
+
+
+def http(ep, path, method="GET"):
+    req = urllib.request.Request(f"http://{ep}{path}", method=method)
+    return json.load(urllib.request.urlopen(req, timeout=10))
+
+
+class WS:
+    """Minimal RFC 6455 client: text frames, client masking, no extensions."""
+
+    def __init__(self, url):
+        hostport, path = url[len("ws://"):].split("/", 1)
+        h, p = hostport.split(":")
+        self.s = socket.create_connection((h, int(p)), timeout=30)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.s.sendall((f"GET /{path} HTTP/1.1\r\nHost: {hostport}\r\nUpgrade: websocket\r\n"
+                        f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                        "Sec-WebSocket-Version: 13\r\n\r\n").encode())
+        buf = b""
+        while b"\r\n\r\n" not in buf:
+            buf += self.s.recv(4096)
+        head, self.buf = buf.split(b"\r\n\r\n", 1)
+        if b" 101 " not in head.split(b"\r\n")[0]:
+            sys.exit(f"websocket refused: {head.decode(errors='replace')}")
+        self.n = 0
+
+    def _read(self, k):
+        while len(self.buf) < k:
+            chunk = self.s.recv(1 << 16)
+            if not chunk:
+                raise EOFError
+            self.buf += chunk
+        out, self.buf = self.buf[:k], self.buf[k:]
+        return out
+
+    def send(self, obj):
+        data = json.dumps(obj).encode()
+        hdr = bytearray([0x81])
+        n = len(data)
+        if n < 126:
+            hdr.append(0x80 | n)
+        elif n < 1 << 16:
+            hdr += bytes([0xFE]) + struct.pack(">H", n)
+        else:
+            hdr += bytes([0xFF]) + struct.pack(">Q", n)
+        mask = os.urandom(4)
+        self.s.sendall(bytes(hdr) + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+    def recv(self):
+        msg = b""
+        while True:
+            b0, b1 = self._read(2)
+            n = b1 & 0x7F
+            if n == 126:
+                n = struct.unpack(">H", self._read(2))[0]
+            elif n == 127:
+                n = struct.unpack(">Q", self._read(8))[0]
+            payload = self._read(n)
+            op = b0 & 0x0F
+            if op == 0x9:  # ping -> ignore (Chromium does not require pong for short sessions)
+                continue
+            msg += payload
+            if b0 & 0x80:
+                return json.loads(msg)
+
+    def call(self, method, **params):
+        self.n += 1
+        self.send({"id": self.n, "method": method, "params": params})
+        while True:
+            r = self.recv()
+            if r.get("id") == self.n:
+                if "error" in r:
+                    sys.exit(f"{method}: {r['error'].get('message')}")
+                return r.get("result", {})
+
+
+def pages(ep):
+    return [t for t in http(ep, "/json/list") if t["type"] == "page"]
+
+
+def resolve(ep, prefix):
+    hits = [t for t in pages(ep) if t["id"].upper().startswith(prefix.upper())]
+    if len(hits) != 1:
+        sys.exit(f"tab id '{prefix}': {len(hits)} matches")
+    return hits[0]
+
+
+def js(ws, expr):
+    r = ws.call("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=True)
+    if "exceptionDetails" in r:
+        sys.exit(r["exceptionDetails"].get("exception", {}).get("description", "JS error"))
+    return r["result"].get("value")
+
+
+KEYS = {"Enter": (13, "\r"), "Tab": (9, "\t"), "Escape": (27, ""), "Backspace": (8, ""),
+        "ArrowDown": (40, ""), "ArrowUp": (38, ""), "ArrowLeft": (37, ""), "ArrowRight": (39, "")}
+
+
+def main(argv):
+    host = "local"
+    if argv[:1] == ["--host"]:
+        host, argv = argv[1], argv[2:]
+    if host not in HOSTS or not argv:
+        sys.exit(__doc__)
+    cmd, args = argv[0], argv[1:]
+    if cmd == "front":
+        # Checked before any connection: activating a tab changes what the owner sees.
+        if "--owner-visible" not in args:
+            sys.exit("front: refused. This changes what the owner sees (it brings a tab to the front "
+                     "of their screen). Re-run with --owner-visible only when the owner asked for it.")
+        args = [a for a in args if a != "--owner-visible"]
+        if len(args) != 1:
+            sys.exit("usage: chromectl front ID --owner-visible")
+    ep = endpoint(host)
+
+    if cmd == "status":
+        print(http(ep, "/json/version")["Browser"], ep)
+    elif cmd == "tabs":
+        for t in pages(ep):
+            print(f"{t['id'][:8]}  {t['title'][:60]:60}  {t['url'][:90]}")
+    elif cmd == "open":
+        browser = WS(http(ep, "/json/version")["webSocketDebuggerUrl"])
+        r = browser.call("Target.createTarget", url=args[0], background=True)
+        print(r["targetId"][:8])
+    elif cmd == "close":
+        t = resolve(ep, args[0])
+        urllib.request.urlopen(f"http://{ep}/json/close/{t['id']}", timeout=10)
+        print("closed", t["id"][:8])
+    elif cmd == "front":
+        t = resolve(ep, args[0])
+        urllib.request.urlopen(f"http://{ep}/json/activate/{t['id']}", timeout=10)
+        print("front", t["id"][:8])
+    else:
+        t = resolve(ep, args[0])
+        ws = WS(t["webSocketDebuggerUrl"])
+        # Background tabs drop key input unless the page believes it has focus.
+        ws.call("Emulation.setFocusEmulationEnabled", enabled=True)
+        if cmd == "nav":
+            ws.call("Page.enable")
+            ws.call("Page.navigate", url=args[1])
+            for _ in range(60):
+                if js(ws, "document.readyState") == "complete":
+                    break
+                time.sleep(0.25)
+            print(js(ws, "location.href"))
+        elif cmd == "text":
+            print(js(ws, "document.body ? document.body.innerText : ''"))
+        elif cmd == "eval":
+            print(json.dumps(js(ws, args[1]), indent=1))
+        elif cmd == "click":
+            ok = js(ws, f"(e=>{{if(!e)return false;e.scrollIntoView({{block:'center'}});e.click();return true}})"
+                        f"(document.querySelector({json.dumps(args[1])}))")
+            print("clicked" if ok else sys.exit(f"no element: {args[1]}"))
+        elif cmd == "type":
+            ok = js(ws, f"(e=>{{if(!e)return false;e.focus();return true}})(document.querySelector({json.dumps(args[1])}))")
+            if not ok:
+                sys.exit(f"no element: {args[1]}")
+            ws.call("Input.insertText", text=args[2])
+            print("typed")
+        elif cmd == "key":
+            code, txt = KEYS.get(args[1], (0, args[1]))
+            base = {"key": args[1], "code": args[1] if args[1] in KEYS else "", "windowsVirtualKeyCode": code}
+            ws.call("Input.dispatchKeyEvent", type="rawKeyDown", **base)
+            if txt:
+                ws.call("Input.dispatchKeyEvent", type="char", text=txt, unmodifiedText=txt, **base)
+            ws.call("Input.dispatchKeyEvent", type="keyUp", **base)
+            print("key", args[1])
+        elif cmd == "shot":
+            data = ws.call("Page.captureScreenshot", format="png")["data"]
+            with open(args[1], "wb") as f:
+                f.write(base64.b64decode(data))
+            print(args[1])
+        else:
+            sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

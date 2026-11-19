@@ -23,7 +23,7 @@ Restart the browser after changing flags. Never bind the port to a non-loopback 
 python3 -m unittest -v
 ```
 
-The suite starts an in-process stub of the DevTools HTTP routes and WebSocket (`tests/stub_cdp.py`). `CHROMECTL_ENDPOINT=host:port` points the tool at the stub. A socket guard fails any test that connects to another port, so a real browser on 9333 is never touched.
+The suite starts an in-process stub of the DevTools HTTP routes and WebSocket (`tests/stub_cdp.py`). `CHROMECTL_ENDPOINT=host:port` points the tool at the stub. The in-process tests run under a socket guard that fails any connect to another port. The child-process tests set `CHROMECTL_ENDPOINT` for the script they start, so a real browser on 9333 is never touched.
 
 ## 3. Run
 

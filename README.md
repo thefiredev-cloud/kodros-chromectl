@@ -46,7 +46,7 @@ Run `./chromectl` with no arguments for the full command list. [BUILD.md](BUILD.
 - It controls one browser per host and has no session or profile handling.
 - Key input covers Enter, Tab, Escape, Backspace and the arrow keys. Other keys go in as typed characters.
 - The remote host needs key-based SSH. The default `browser-host.example.com` is a placeholder: set `CHROMECTL_REMOTE`.
-- The tests never touch a real browser. A socket guard fails any test that connects outside the stub.
+- The tests never touch a real browser. The in-process tests run under a socket guard that fails any connect outside the stub. The child-process tests point the script at the stub with `CHROMECTL_ENDPOINT`.
 
 ## License
 
